@@ -1,38 +1,47 @@
-
 import pickle
-
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-import numpy as np
+from sklearn.metrics import accuracy_score, classification_report
 
-k=r'C:\Users\gouth\Desktop\projrct\projrct\sign_dete\data.pickle'
-data_dict = pickle.load(open(k, 'rb'))
+data_dict = pickle.load(open('./data.pickle', 'rb'))
 
-'''data = np.asarray(data_dict['data'])
-labels = np.asarray(data_dict['labels'])
+data_raw   = data_dict['data']
+labels_raw = data_dict['labels']
 
-x_train, x_test, y_train, y_test = train_test_split(data, labels, test_size=0.2, shuffle=True, stratify=labels)'''
+# Keep only samples with exactly 42 features
+EXPECTED = 42
+data_clean   = [d for d in data_raw                        if len(d) == EXPECTED]
+labels_clean = [l for d, l in zip(data_raw, labels_raw)   if len(d) == EXPECTED]
 
+removed = len(data_raw) - len(data_clean)
+if removed:
+    print(f'Warning: removed {removed} corrupt samples.')
 
-# Convert data and labels to NumPy arrays
-x_data = np.array(data_dict['data'])
-y_labels = np.array(data_dict['labels'])
+data   = np.array(data_clean,   dtype=np.float32)
+labels = np.array(labels_clean)
 
-# Perform train-test split
-x_train, x_test, y_train, y_test = train_test_split(x_data, y_labels, test_size=0.2, shuffle=True, stratify=y_labels)
+print(f'Training on {len(data)} samples across {len(set(labels))} classes.')
 
+x_train, x_test, y_train, y_test = train_test_split(
+    data, labels, test_size=0.2, shuffle=True, stratify=labels, random_state=42
+)
 
-model = RandomForestClassifier()
-
+model = RandomForestClassifier(
+    n_estimators=200,
+    max_depth=15,
+    min_samples_split=4,
+    random_state=42,
+    n_jobs=-1
+)
 model.fit(x_train, y_train)
 
-y_predict = model.predict(x_test)
+y_pred = model.predict(x_test)
+print(f'\nOverall accuracy: {accuracy_score(y_test, y_pred) * 100:.2f}%')
+print('\nPer-class report:')
+print(classification_report(y_test, y_pred))
 
-score = accuracy_score(y_predict, y_test)
+with open('model.p', 'wb') as f:
+    pickle.dump({'model': model}, f)
 
-print('{}% of samples were classified correctly !'.format(score * 100))
-
-f = open('model.p', 'wb')
-pickle.dump({'model': model}, f)
-f.close()
+print('Model saved to model.p')

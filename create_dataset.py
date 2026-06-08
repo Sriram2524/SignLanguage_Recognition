@@ -1,50 +1,69 @@
 import os
 import pickle
-
-import mediapipe as mp
 import cv2
-import matplotlib.pyplot as plt
+import mediapipe as mp
+import numpy as np
 
-#name
-mp_hands = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
+# ── MediaPipe 0.10+ new API ──────────────────────────────────────────────────
+BaseOptions          = mp.tasks.BaseOptions
+HandLandmarker       = mp.tasks.vision.HandLandmarker
+HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
+VisionRunningMode    = mp.tasks.vision.RunningMode
 
-hands = mp_hands.Hands(static_image_mode=True, min_detection_confidence=0.3)
+MODEL_PATH = 'hand_landmarker.task'   # already in your project folder
 
-DATA_DIR = 'data'
+options = HandLandmarkerOptions(
+    base_options=BaseOptions(model_asset_path=MODEL_PATH),
+    running_mode=VisionRunningMode.IMAGE,
+    num_hands=1,                        # single hand → always 42 features
+    min_hand_detection_confidence=0.3,
+    min_hand_presence_confidence=0.3,
+    min_tracking_confidence=0.3,
+)
 
-data = []
+DATA_DIR = './data'
+data   = []
 labels = []
-for dir_ in os.listdir(DATA_DIR):
-    for img_path in os.listdir(os.path.join(DATA_DIR, dir_)):
-        data_aux = []
+skipped = 0
 
-        x_ = []
-        y_ = []
+with HandLandmarker.create_from_options(options) as landmarker:
+    for dir_ in sorted(os.listdir(DATA_DIR), key=lambda x: int(x)):
+        dir_path = os.path.join(DATA_DIR, dir_)
+        if not os.path.isdir(dir_path):
+            continue
 
-        img = cv2.imread(os.path.join(DATA_DIR, dir_, img_path))
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        for img_file in os.listdir(dir_path):
+            img_bgr = cv2.imread(os.path.join(dir_path, img_file))
+            if img_bgr is None:
+                skipped += 1
+                continue
 
-        results = hands.process(img_rgb)
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                for i in range(len(hand_landmarks.landmark)):
-                    x = hand_landmarks.landmark[i].x
-                    y = hand_landmarks.landmark[i].y
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+            result   = landmarker.detect(mp_image)
 
-                    x_.append(x)
-                    y_.append(y)
+            if not result.hand_landmarks or len(result.hand_landmarks) != 1:
+                skipped += 1
+                continue
 
-                for i in range(len(hand_landmarks.landmark)):
-                    x = hand_landmarks.landmark[i].x
-                    y = hand_landmarks.landmark[i].y
-                    data_aux.append(x - min(x_))
-                    data_aux.append(y - min(y_))
+            landmarks = result.hand_landmarks[0]   # 21 landmarks
+            x_ = [lm.x for lm in landmarks]
+            y_ = [lm.y for lm in landmarks]
 
-            data.append(data_aux)
-            labels.append(dir_)
+            data_aux = []
+            for lm in landmarks:
+                data_aux.append(lm.x - min(x_))
+                data_aux.append(lm.y - min(y_))
 
-f = open('data.pickle', 'wb')
-pickle.dump({'data': data, 'labels': labels}, f)
-f.close()
+            if len(data_aux) == 42:
+                data.append(data_aux)
+                labels.append(dir_)
+            else:
+                skipped += 1
+
+print(f'Dataset: {len(data)} samples, {skipped} skipped.')
+
+with open('data.pickle', 'wb') as f:
+    pickle.dump({'data': data, 'labels': labels}, f)
+
+print('Saved to data.pickle')
